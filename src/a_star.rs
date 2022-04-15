@@ -150,3 +150,39 @@ impl<TNode: AStarNode> NodeDetails<TNode> {
         self.g + self.h
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug)]
+    struct TestNode(i32);
+
+    impl AStarNode for TestNode {}
+
+    fn distance_function(node_details: CurrentNodeDetails<TestNode>) -> i32 {
+        let CurrentNodeDetails {
+            current_node: left,
+            target_node: right,
+            cost_to_move_to_current: _to_current
+        } = node_details;
+        (left.0 - right.0).abs()
+    }
+
+    fn get_successors(node: &TestNode) -> Vec<Successor<TestNode>> {
+        vec![
+            Successor::new(TestNode(node.0 - 1), 1),
+            Successor::new(TestNode(node.0 + 1), 1),
+        ]
+    }
+
+    #[test]
+    fn should_find_seven() {
+        let start = TestNode(1);
+        let target = TestNode(7);
+
+        let solution = a_star_search(start, &target, get_successors, distance_function, None).unwrap();
+
+        assert_eq!(solution, vec![TestNode(1), TestNode(2), TestNode(3), TestNode(4), TestNode(5), TestNode(6), TestNode(7)])
+    }
+}
