@@ -13,6 +13,30 @@ pub struct AStarOptions {
     pub print_every: Option<usize>,
 }
 
+impl AStarOptions {
+    pub fn print_stats() -> Self {
+        Self {
+            print_debug: true,
+            print_current_val: false,
+            print_every: None,
+        }
+    }
+    pub fn print_stats_and_values() -> Self {
+        Self {
+            print_debug: true,
+            print_current_val: true,
+            print_every: None,
+        }
+    }
+    pub fn print_stats_and_values_every(x: usize) -> Self {
+        Self {
+            print_debug: true,
+            print_current_val: true,
+            print_every: Some(x),
+        }
+    }
+}
+
 const DEFAULT_OPTIONS: AStarOptions = AStarOptions {
     print_debug: false,
     print_current_val: false,
