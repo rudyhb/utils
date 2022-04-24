@@ -1,12 +1,24 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap};
 use std::fmt::Debug;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use rayon::prelude::*;
 
 type TNumber = i32;
 
-pub trait AStarNode: Hash + Eq + PartialEq + Clone + Ord + PartialOrd + Send + std::marker::Sync + Debug {}
+pub trait AStarNode: Hash + Eq + PartialEq + Ord + PartialOrd + Send + std::marker::Sync + Debug {}
+
+trait GetHash: Hash {
+    fn get_hash(&self) -> u64;
+}
+
+impl<T: Hash> GetHash for T {
+    fn get_hash(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+}
 
 pub struct AStarOptions {
     print_debug: bool,
@@ -76,41 +88,67 @@ pub enum AStarError {
     MutexError(&'static str),
 }
 
+
+struct NodeList<TNode: AStarNode> {
+    nodes: HashMap<u64, NodeDetails<TNode>>,
+}
+
+impl<TNode: AStarNode> NodeList<TNode> {
+    pub(crate) fn new(start: TNode) -> Self {
+        let mut result = Self {
+            nodes: Default::default()
+        };
+        let hash = start.get_hash();
+        result.nodes.insert(hash, NodeDetails::new(start, 0, 0));
+        result
+    }
+    pub(crate) fn try_insert_successor(&mut self, details: NodeDetails<TNode>) {
+        let hash = details.node.get_hash();
+        if let Some(existing) = self.nodes.get(&hash) {
+            if existing.f() <= details.f() {
+                return;
+            }
+        }
+        self.nodes.insert(hash, details);
+    }
+    pub(crate) fn get_next(&mut self, count: usize) -> Option<(Vec<&NodeDetails<TNode>>, usize)> {
+        let open_list = self.nodes.values().filter(|node| node.is_open);
+        let node_indices = if count == 1 {
+            let index = open_list.into_iter().min_by(sorting_function).map(|details| details.node.get_hash()).expect("no minimum");
+            self.nodes.get_mut(&index).unwrap().is_open = false;
+            vec![index]
+        } else {
+            let mut q_nodes: Vec<_> = open_list.into_iter().collect();
+            q_nodes.sort_by(sorting_function);
+            q_nodes.into_iter().take(count)
+                .map(|details| details.node.get_hash())
+                .collect::<Vec<_>>()
+        };
+        for &index in node_indices.iter() {
+            self.nodes.get_mut(&index).unwrap().is_open = false;
+        }
+        let results: Vec<_> = node_indices.into_iter()
+            .map(|i| self.nodes.get(&i).unwrap())
+            .collect();
+        if results.is_empty() {
+            None
+        } else {
+            Some((results, self.nodes.values().filter(|n| n.is_open).count()))
+        }
+    }
+}
+
 pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>> + std::marker::Sync + std::marker::Send, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + std::marker::Sync>(start: TNode, end: &TNode, get_successors: TFunc, distance_function: TFunc2, options: Option<&AStarOptions>) -> Result<TNode> {
     let default_options = AStarOptions::default();
     let options = options.unwrap_or(&default_options);
-    let mut closed_list: HashMap<TNode, NodeDetails<TNode>> = Default::default();
-    let mut open_list: HashMap<TNode, NodeDetails<TNode>> = Default::default();
-    open_list.insert(start, NodeDetails::new(0, 0));
+    let mut node_list = NodeList::new(start);
 
     let mut i = 0usize;
-    while !open_list.is_empty() {
+    let n = if options.run_in_parallel {
+        crate::num_cpus::get()
+    } else { 1 };
+    while let Some((nodes, remaining_list_len)) = node_list.get_next(n) {
         i += 1;
-
-        let (q_nodes, list_len) = {
-            let q_nodes = if options.run_in_parallel {
-                let threads = crate::num_cpus::get();
-
-                let mut q_nodes: Vec<_> = open_list.iter().collect();
-                q_nodes.sort_by(sorting_function);
-                q_nodes.into_iter().take(threads)
-                    .map(|(key, _)| key).cloned()
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|q_node| {
-                        let q_details = open_list.remove(&q_node).unwrap();
-                        (q_node, q_details)
-                    })
-                    .collect::<Vec<_>>()
-            } else {
-                let q_node = open_list.iter().min_by(sorting_function).map(|(key, _)| key).cloned().expect("no minimum");
-                let q_details = open_list.remove(&q_node).unwrap();
-                vec![(q_node, q_details)]
-            };
-
-            (q_nodes, open_list.len())
-        };
-
         if options.print_debug {
             let print = if let Some(every) = options.print_every {
                 i % every == 0
@@ -118,40 +156,31 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
                 true
             };
             if print {
-                if let Some((q_node, q_details)) = q_nodes.iter().next() {
-                    if options.print_current_val {
-                        let mut val = format!("{:?}", q_node);
-                        if val.len() > 130 {
-                            val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
-                        }
-                        println!("got q {} with g={}, h={}, list_len={}", val, q_details.g, q_details.h, list_len);
-                    } else {
-                        println!("got q with g={}, h={}, list_len={}", q_details.g, q_details.h, list_len);
-                    }
-                }
+                print_debug(&nodes[..], remaining_list_len, options.print_current_val);
             }
         }
 
-        let successors = {
-            if q_nodes.len() == 1 {
-                let (q_node, q_details) = q_nodes.iter().next().unwrap();
-                let (successors, done) = run_get_successors(q_node, q_details, end, &get_successors, &distance_function);
-                if let Some((node, details)) = done {
-                    return Ok(make_results(node, details));
+        let successors: Vec<NodeDetails<TNode>> = {
+            if nodes.len() == 1 {
+                let details = nodes.iter().cloned().next().unwrap();
+                let (successors, done) = run_get_successors(details, end, &get_successors, &distance_function);
+                if let Some(details) = done {
+                    if options.print_debug { println!("a_star took {} steps", i) }
+                    return Ok(make_results(details, node_list));
                 }
                 successors
             } else {
                 let (successors, final_results) =
-                    q_nodes.par_iter()
-                        .map(|(q_node, q_details)| {
+                    nodes.par_iter()
+                        .map(|details| {
                             let get_successors = &get_successors;
                             let distance_function = &distance_function;
-                            let (successors, done) = run_get_successors(q_node, q_details, end, get_successors, distance_function);
+                            let (successors, done) = run_get_successors(details, end, get_successors, distance_function);
                             (successors, done)
                         })
-                        .reduce(|| (Vec::new(), None), |(mut tot_successors, any_done): (Vec<(TNode, NodeDetails<TNode>)>, Option<(TNode, NodeDetails<TNode>)>), (successors, done): (Vec<(TNode, NodeDetails<TNode>)>, Option<(TNode, NodeDetails<TNode>)>)| {
-                            if let Some((_, done_details)) = &done {
-                                if let Some((_, any_done_details)) = &any_done {
+                        .reduce(|| (Vec::new(), None), |(mut tot_successors, any_done): (Vec<NodeDetails<TNode>>, Option<NodeDetails<TNode>>), (successors, done): (Vec<NodeDetails<TNode>>, Option<NodeDetails<TNode>>)| {
+                            if let Some(done_details) = &done {
+                                if let Some(any_done_details) = &any_done {
                                     if done_details.g < any_done_details.g {
                                         return (tot_successors, done);
                                     }
@@ -162,46 +191,49 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
                             tot_successors.extend(successors);
                             (tot_successors, any_done)
                         });
-                if let Some((node, details)) = final_results {
-                    return Ok(make_results(node, details));
+                if let Some(details) = final_results {
+                    if options.print_debug { println!("a_star took {} steps", i) }
+                    return Ok(make_results(details, node_list));
                 }
 
                 successors
             }
         };
 
-        for (successor, details) in successors {
-            if let Some(existing) = open_list.get(&successor) {
-                if existing.f() <= details.f() {
-                    continue;
-                }
-            }
-            if let Some(existing) = closed_list.get(&successor) {
-                if existing.f() <= details.f() {
-                    continue;
-                }
-            }
-            open_list.insert(successor, details);
+        for details in successors {
+            node_list.try_insert_successor(details);
         }
-
-        closed_list.extend(q_nodes);
     }
 
     Err(AStarError::NoSolutionFound)
 }
 
-fn run_get_successors<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>>, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + std::marker::Sync>(q_node: &TNode, q_details: &NodeDetails<TNode>, end: &TNode, get_successors: &TFunc, distance_function: &TFunc2) -> (Vec<(TNode, NodeDetails<TNode>)>, Option<(TNode, NodeDetails<TNode>)>) {
-    let successors = get_successors(&q_node);
-    let mut results: Vec<(TNode, NodeDetails<TNode>)> = Vec::with_capacity(successors.len());
+fn print_debug<TNode: AStarNode>(nodes: &[&NodeDetails<TNode>], list_len: usize, print_current_val: bool) {
+    if let Some(q_details) = nodes.iter().next() {
+        if print_current_val {
+            let mut val = format!("{:?}", q_details.node);
+            if val.len() > 130 {
+                val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
+            }
+            println!("got q {} with g={}, h={}, list_len={}", val, q_details.g, q_details.h, list_len);
+        } else {
+            println!("got q with g={}, h={}, list_len={}", q_details.g, q_details.h, list_len);
+        }
+    }
+}
+
+fn run_get_successors<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>>, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + std::marker::Sync>(parent: &NodeDetails<TNode>, end: &TNode, get_successors: &TFunc, distance_function: &TFunc2) -> (Vec<NodeDetails<TNode>>, Option<NodeDetails<TNode>>) {
+    let successors = get_successors(&parent.node);
+    let mut results: Vec<NodeDetails<TNode>> = Vec::with_capacity(successors.len());
     for Successor {
         node: successor,
         cost_to_move_here: distance
     } in successors {
-        let to_current = q_details.g + distance;
+        let to_current = parent.g + distance;
 
         if successor == *end {
-            let details = NodeDetails::new_with(to_current, 0, q_node.clone(), q_details.clone());
-            return (vec![], Some((successor, details)));
+            let details = NodeDetails::new_with(successor, to_current, 0, parent);
+            return (vec![], Some(details));
         }
 
         let to_end = distance_function(CurrentNodeDetails {
@@ -209,50 +241,50 @@ fn run_get_successors<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode
             target_node: &end,
             cost_to_move_to_current: to_current,
         });
-        let details = NodeDetails::new_with(to_current, to_end, q_node.clone(), q_details.clone());
-        results.push((successor, details));
+        let details = NodeDetails::new_with(successor, to_current, to_end, parent);
+        results.push(details);
     }
 
     (results, None)
 }
 
-fn sorting_function<TNode: AStarNode>((a_node, a): &(&TNode, &NodeDetails<TNode>), (b_node, b): &(&TNode, &NodeDetails<TNode>)) -> Ordering {
+fn sorting_function<TNode: AStarNode>(a: &&NodeDetails<TNode>, b: &&NodeDetails<TNode>) -> Ordering {
     let c = a.f().cmp(&b.f());
     if c == Ordering::Equal {
-        a_node.cmp(&b_node)
+        a.node.cmp(&b.node)
     } else {
         c
     }
 }
 
-fn make_results<'a, TNode: AStarNode>(end: TNode, details: NodeDetails<TNode>) -> Vec<TNode> {
-    let mut results = vec![end];
-    let mut parent = details.parent;
-    while let Some(parent_details) = parent {
-        let (parent_node, parent_details) = *parent_details;
-        results.push(parent_node);
-        parent = parent_details.parent;
+fn make_results<TNode: AStarNode>(end: NodeDetails<TNode>, mut node_list: NodeList<TNode>) -> Vec<TNode> {
+    let mut results = vec![end.node];
+    let mut parent = end.parent;
+    while let Some(parent_hash) = parent {
+        let node = node_list.nodes.remove(&parent_hash).unwrap();
+        results.push(node.node);
+        parent = node.parent;
     }
     results.reverse();
     results
 }
 
-
-#[derive(Clone)]
 struct NodeDetails<TNode: AStarNode> {
+    node: TNode,
+    is_open: bool,
     g: TNumber,
     h: TNumber,
-    parent: Option<Box<(TNode, NodeDetails<TNode>)>>,
+    parent: Option<u64>,
 }
 
 impl<TNode: AStarNode> NodeDetails<TNode> {
-    pub(crate) fn new(g: TNumber, h: TNumber) -> Self {
-        Self { g, h, parent: None }
+    pub(crate) fn new(node: TNode, g: TNumber, h: TNumber) -> Self {
+        Self { node, g, h, parent: None, is_open: true }
     }
-    pub(crate) fn new_with(g: TNumber, h: TNumber, parent: TNode, parent_details: NodeDetails<TNode>) -> Self {
-        Self { g, h, parent: Some(Box::new((parent, parent_details))) }
+    pub(crate) fn new_with(node: TNode, g: TNumber, h: TNumber, parent: &NodeDetails<TNode>) -> Self {
+        Self { node, g, h, parent: Some(parent.node.get_hash()), is_open: true }
     }
-    #[inline]
+    #[inline(always)]
     pub(crate) fn f(&self) -> TNumber {
         self.g + self.h
     }
