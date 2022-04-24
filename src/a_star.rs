@@ -172,12 +172,12 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
 
         for (successor, details) in successors {
             if let Some(existing) = open_list.get(&successor) {
-                if existing.f() < details.f() {
+                if existing.f() <= details.f() {
                     continue;
                 }
             }
             if let Some(existing) = closed_list.get(&successor) {
-                if existing.f() < details.f() {
+                if existing.f() <= details.f() {
                     continue;
                 }
             }
