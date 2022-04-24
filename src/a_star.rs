@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap};
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
+use rayon::prelude::*;
 
 type TNumber = i32;
 
@@ -73,7 +73,7 @@ pub type Result<TNode> = std::result::Result<Vec<TNode>, AStarError>;
 #[derive(Debug)]
 pub enum AStarError {
     NoSolutionFound,
-    MutexError(&'static str)
+    MutexError(&'static str),
 }
 
 pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>> + std::marker::Sync + std::marker::Send, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + std::marker::Sync>(start: TNode, end: &TNode, get_successors: TFunc, distance_function: TFunc2, options: Option<&AStarOptions>) -> Result<TNode> {
@@ -93,9 +93,10 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
 
                 let mut q_nodes: Vec<_> = open_list.iter().collect();
                 q_nodes.sort_by(sorting_function);
-                let q_nodes = q_nodes.into_iter().take(threads)
-                    .map(|(key, _)| key).cloned().collect::<Vec<_>>();
-                q_nodes.into_iter()
+                q_nodes.into_iter().take(threads)
+                    .map(|(key, _)| key).cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
                     .map(|q_node| {
                         let q_details = open_list.remove(&q_node).unwrap();
                         (q_node, q_details)
@@ -140,40 +141,30 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
                 }
                 successors
             } else {
-                let successors: Vec<(TNode, NodeDetails<TNode>)> = Default::default();
-                let final_results: Vec<(TNode, NodeDetails<TNode>)> = Default::default();
-                let successors: Arc<Mutex<_>> = Arc::new(Mutex::new(successors));
-                let final_results: Arc<Mutex<_>> = Arc::new(Mutex::new(final_results));
-
-                rayon::scope(|s| {
-                    for (q_node, q_details) in q_nodes.iter() {
-                        let result_successors = Arc::clone(&successors);
-                        let final_results = Arc::clone(&final_results);
-                        let get_successors = &get_successors;
-                        let distance_function = &distance_function;
-                        s.spawn(move |_| {
+                let (successors, final_results) =
+                    q_nodes.par_iter()
+                        .map(|(q_node, q_details)| {
+                            let get_successors = &get_successors;
+                            let distance_function = &distance_function;
                             let (successors, done) = run_get_successors(q_node, q_details, end, get_successors, distance_function);
-                            if let Some((node, details)) = done {
-                                let mut final_results = final_results.lock().unwrap();
-                                final_results.push((node, details));
-                                return;
-                            }
-                            let mut result_successors = result_successors.lock().unwrap();
-                            result_successors.extend(successors);
+                            (successors, done)
                         })
-                    }
-                });
-
-                let lock = Arc::try_unwrap(final_results).or(Err(AStarError::MutexError("lock still has multiple owners")))?;
-                let final_results = lock.into_inner().or(Err(AStarError::MutexError("mutex cannot be locked")))?;
-                if !final_results.is_empty() {
-                    let (node, details) = final_results.into_iter().min_by(|(_, a), (_, b)| a.g.cmp(&b.g))
-                        .unwrap();
+                        .reduce(|| (Vec::new(), None), |(mut tot_successors, any_done): (Vec<(TNode, NodeDetails<TNode>)>, Option<(TNode, NodeDetails<TNode>)>), (successors, done): (Vec<(TNode, NodeDetails<TNode>)>, Option<(TNode, NodeDetails<TNode>)>)| {
+                            if let Some((_, done_details)) = &done {
+                                if let Some((_, any_done_details)) = &any_done {
+                                    if done_details.g < any_done_details.g {
+                                        return (tot_successors, done);
+                                    }
+                                } else {
+                                    return (tot_successors, done);
+                                }
+                            }
+                            tot_successors.extend(successors);
+                            (tot_successors, any_done)
+                        });
+                if let Some((node, details)) = final_results {
                     return Ok(make_results(node, details));
                 }
-
-                let lock = Arc::try_unwrap(successors).or(Err(AStarError::MutexError("lock still has multiple owners")))?;
-                let successors = lock.into_inner().or(Err(AStarError::MutexError("mutex cannot be locked")))?;
 
                 successors
             }
