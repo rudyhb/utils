@@ -3,10 +3,11 @@ use std::collections::{HashMap};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use rayon::prelude::*;
+use log::*;
 
 type TNumber = i32;
 
-pub trait AStarNode: Hash + Eq + PartialEq + Ord + PartialOrd + Send + std::marker::Sync + Debug {}
+pub trait AStarNode: Hash + Eq + PartialEq + Ord + PartialOrd + Send + Sync + Debug {}
 
 trait GetHash: Hash {
     fn get_hash(&self) -> u64;
@@ -21,28 +22,10 @@ impl<T: Hash> GetHash for T {
 }
 
 pub struct AStarOptions {
-    print_debug: bool,
-    print_current_val: bool,
-    print_every: Option<usize>,
     run_in_parallel: bool,
 }
 
 impl AStarOptions {
-    pub fn print_stats() -> Self {
-        let mut s = Self::default();
-        s.print_debug = true;
-        s
-    }
-    pub fn print_stats_and_values() -> Self {
-        let mut s = Self::print_stats();
-        s.print_current_val = true;
-        s
-    }
-    pub fn print_stats_and_values_every(x: usize) -> Self {
-        let mut s = Self::print_stats_and_values();
-        s.print_every = Some(x);
-        s
-    }
     pub fn run_in_parallel(mut self) -> Self {
         self.run_in_parallel = true;
         self
@@ -52,9 +35,6 @@ impl AStarOptions {
 impl Default for AStarOptions {
     fn default() -> Self {
         Self {
-            print_debug: false,
-            print_current_val: false,
-            print_every: None,
             run_in_parallel: false,
         }
     }
@@ -138,7 +118,7 @@ impl<TNode: AStarNode> NodeList<TNode> {
     }
 }
 
-pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>> + std::marker::Sync + std::marker::Send, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + std::marker::Sync>(start: TNode, end: &TNode, get_successors: TFunc, distance_function: TFunc2, options: Option<&AStarOptions>) -> Result<TNode> {
+pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>> + Sync + Send, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + Sync>(start: TNode, end: &TNode, get_successors: TFunc, distance_function: TFunc2, options: Option<&AStarOptions>) -> Result<TNode> {
     let default_options = AStarOptions::default();
     let options = options.unwrap_or(&default_options);
     let mut node_list = NodeList::new(start);
@@ -149,23 +129,14 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
     } else { 1 };
     while let Some((nodes, remaining_list_len)) = node_list.get_next(n) {
         i += 1;
-        if options.print_debug {
-            let print = if let Some(every) = options.print_every {
-                i % every == 0
-            } else {
-                true
-            };
-            if print {
-                print_debug(&nodes[..], remaining_list_len, options.print_current_val);
-            }
-        }
+        print_debug(&nodes[..], remaining_list_len, i % (remaining_list_len / 10).max(1) == 0);
 
         let successors: Vec<NodeDetails<TNode>> = {
             if nodes.len() == 1 {
                 let details = nodes.iter().cloned().next().unwrap();
                 let (successors, done) = run_get_successors(details, end, &get_successors, &distance_function);
                 if let Some(details) = done {
-                    if options.print_debug { println!("a_star took {} steps", i) }
+                    debug!("a_star took {} steps", i);
                     return Ok(make_results(details, node_list));
                 }
                 successors
@@ -192,7 +163,7 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
                             (tot_successors, any_done)
                         });
                 if let Some(details) = final_results {
-                    if options.print_debug { println!("a_star took {} steps", i) }
+                    debug!("a_star took {} steps", i);
                     return Ok(make_results(details, node_list));
                 }
 
@@ -208,21 +179,24 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
     Err(AStarError::NoSolutionFound)
 }
 
-fn print_debug<TNode: AStarNode>(nodes: &[&NodeDetails<TNode>], list_len: usize, print_current_val: bool) {
+fn print_debug<TNode: AStarNode>(nodes: &[&NodeDetails<TNode>], list_len: usize, debug_level: bool) {
+    let current_val = |val: &TNode| {
+        let mut val = format!("{:?}", val);
+        if val.len() > 130 {
+            val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
+        }
+        val
+    };
     if let Some(q_details) = nodes.iter().next() {
-        if print_current_val {
-            let mut val = format!("{:?}", q_details.node);
-            if val.len() > 130 {
-                val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
-            }
-            println!("got q {} with g={}, h={}, list_len={}", val, q_details.g, q_details.h, list_len);
+        if debug_level {
+            debug!("got q {} with g={}, h={}, list_len={}", current_val(&q_details.node), q_details.g, q_details.h, list_len);
         } else {
-            println!("got q with g={}, h={}, list_len={}", q_details.g, q_details.h, list_len);
+            trace!("got q {} with g={}, h={}, list_len={}", current_val(&q_details.node), q_details.g, q_details.h, list_len);
         }
     }
 }
 
-fn run_get_successors<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>>, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + std::marker::Sync>(parent: &NodeDetails<TNode>, end: &TNode, get_successors: &TFunc, distance_function: &TFunc2) -> (Vec<NodeDetails<TNode>>, Option<NodeDetails<TNode>>) {
+fn run_get_successors<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>>, TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + Sync>(parent: &NodeDetails<TNode>, end: &TNode, get_successors: &TFunc, distance_function: &TFunc2) -> (Vec<NodeDetails<TNode>>, Option<NodeDetails<TNode>>) {
     let successors = get_successors(&parent.node);
     let mut results: Vec<NodeDetails<TNode>> = Vec::with_capacity(successors.len());
     for Successor {
@@ -351,7 +325,7 @@ mod tests {
         let start = TestNode(1);
         let target = TestNode(7);
 
-        let options = AStarOptions::print_stats_and_values().run_in_parallel();
+        let options = AStarOptions::default().run_in_parallel();
         let options = Some(&options);
 
         let solution = {
