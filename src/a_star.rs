@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use rayon::prelude::*;
 use log::*;
@@ -180,18 +180,11 @@ pub fn a_star_search<TNode: AStarNode, TFunc: Fn(&TNode) -> Vec<Successor<TNode>
 }
 
 fn print_debug<TNode: AStarNode>(nodes: &[&NodeDetails<TNode>], list_len: usize, debug_level: bool) {
-    let current_val = |val: &TNode| {
-        let mut val = format!("{:?}", val);
-        if val.len() > 130 {
-            val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
-        }
-        val
-    };
     if let Some(q_details) = nodes.iter().next() {
         if debug_level {
-            debug!("got q {} with g={}, h={}, list_len={}", current_val(&q_details.node), q_details.g, q_details.h, list_len);
+            debug!("got {:?}, list_len={}", q_details, list_len);
         } else {
-            trace!("got q {} with g={}, h={}, list_len={}", current_val(&q_details.node), q_details.g, q_details.h, list_len);
+            trace!("got {:?}, list_len={}", q_details, list_len);
         }
     }
 }
@@ -249,6 +242,16 @@ struct NodeDetails<TNode: AStarNode> {
     g: TNumber,
     h: TNumber,
     parent: Option<u64>,
+}
+
+impl<TNode: AStarNode> Debug for NodeDetails<TNode> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut val = format!("{:?}", self.node);
+        if val.len() > 130 {
+            val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
+        }
+        write!(f, "q {} with g={}, h={}", val, self.g, self.h)
+    }
 }
 
 impl<TNode: AStarNode> NodeDetails<TNode> {
