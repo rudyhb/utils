@@ -173,7 +173,9 @@ pub fn a_star_search<
                     }
                 } {
                     let end_details = NodeDetails::new_with(successor, to_current, 0, parent);
-                    debug!("a_star took {} steps", i);
+                    if !options.suppress_logs {
+                        debug!("a_star took {} steps", i);
+                    }
                     return Ok(make_results(end_details, node_list));
                 }
 
