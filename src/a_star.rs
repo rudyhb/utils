@@ -4,7 +4,9 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
+use std::time::Duration;
 use thiserror::Error;
+use crate::timeout::Timeout;
 
 type TNumber = i32;
 
@@ -24,6 +26,7 @@ impl<T: Hash> GetHash for T {
 
 pub struct AStarOptions<TNode: AStarNode> {
     custom_end_condition: Option<Box<dyn Fn(&TNode, &TNode) -> bool>>,
+    log_interval: Duration,
 }
 
 impl<TNode: AStarNode> AStarOptions<TNode> {
@@ -34,12 +37,20 @@ impl<TNode: AStarNode> AStarOptions<TNode> {
         self.custom_end_condition = Some(ending_condition);
         self
     }
+    pub fn with_log_interval(
+        mut self,
+        log_interval: Duration,
+    ) -> Self {
+        self.log_interval = log_interval;
+        self
+    }
 }
 
 impl<TNode: AStarNode> Default for AStarOptions<TNode> {
     fn default() -> Self {
         Self {
             custom_end_condition: None,
+            log_interval: Duration::from_secs(5),
         }
     }
 }
@@ -123,14 +134,18 @@ pub fn a_star_search<
     let options = options.unwrap_or(&default_options);
     let mut node_list = NodeList::new(start);
     let end_condition = &options.custom_end_condition;
+    let mut timeout = Timeout::start(options.log_interval);
 
     for i in 1.. {
         let (parent, remaining_list_len) = node_list.get_next()?;
-        print_debug(
-            parent,
-            remaining_list_len,
-            i % (remaining_list_len / 10).max(1) == 0,
-        );
+        if timeout.is_done() {
+            print_debug(
+                parent,
+                remaining_list_len,
+                i % (remaining_list_len / 10).max(1) == 0,
+            );
+            timeout.restart();
+        }
 
         let successors: Vec<NodeDetails<TNode>> = {
             let successors = get_successors(&parent.node);
@@ -303,7 +318,7 @@ mod tests {
                 TestNode(4),
                 TestNode(5),
                 TestNode(6),
-                TestNode(7)
+                TestNode(7),
             ]
         )
     }
@@ -331,7 +346,7 @@ mod tests {
                 TestNode(5),
                 TestNode(6),
                 TestNode(7),
-                TestNode(8)
+                TestNode(8),
             ]
         )
     }
