@@ -1,17 +1,20 @@
 use std::time::{Duration, Instant};
 
 pub struct Timer<T>
-    where T: FnMut(Duration) -> ()
+where
+    T: FnMut(Duration) -> (),
 {
     start: Instant,
     on_finish: T,
 }
 
 impl<T> Timer<T>
-    where T: FnMut(Duration) -> ()
+where
+    T: FnMut(Duration) -> (),
 {
     pub fn start(on_finish: T) -> Self
-        where T: FnMut(Duration) -> ()
+    where
+        T: FnMut(Duration) -> (),
     {
         Self {
             start: Instant::now(),
@@ -20,7 +23,9 @@ impl<T> Timer<T>
     }
 }
 
-impl<T> Drop for Timer<T> where T: FnMut(Duration) -> ()
+impl<T> Drop for Timer<T>
+where
+    T: FnMut(Duration) -> (),
 {
     fn drop(&mut self) {
         (self.on_finish)(self.start.elapsed());

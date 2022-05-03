@@ -9,7 +9,12 @@ pub enum ExpandDirection {
     Right,
 }
 
-pub fn get_zero<TFun: Fn(f64) -> f64>(func: TFun, left: f64, right: f64, options: &Options) -> Option<f64> {
+pub fn get_zero<TFun: Fn(f64) -> f64>(
+    func: TFun,
+    left: f64,
+    right: f64,
+    options: &Options,
+) -> Option<f64> {
     let mut left = left;
     let mut right = right;
     let mut value_left = func(left);
@@ -57,9 +62,7 @@ mod tests {
 
     #[test]
     fn should_get_zero() {
-        let func = |x: f64| -> f64 {
-            x.powi(3) - 2.0 * x.powi(2) + 13.0
-        };
+        let func = |x: f64| -> f64 { x.powi(3) - 2.0 * x.powi(2) + 13.0 };
 
         let options = Options {
             epsilon: 0.001,
@@ -75,9 +78,7 @@ mod tests {
 
     #[test]
     fn should_get_zero_unbounded_right() {
-        let func = |x: f64| -> f64 {
-            x.powi(2) - 20.0
-        };
+        let func = |x: f64| -> f64 { x.powi(2) - 20.0 };
 
         let options = Options {
             epsilon: 0.001,
