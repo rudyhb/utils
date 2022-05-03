@@ -138,14 +138,14 @@ pub fn a_star_search<
 
     for i in 1.. {
         let (parent, remaining_list_len) = node_list.get_next()?;
-        if timeout.is_done() {
-            print_debug(
-                parent,
-                remaining_list_len,
-                i % (remaining_list_len / 10).max(1) == 0,
-            );
-            timeout.restart();
-        }
+        print_debug(
+            parent,
+            remaining_list_len,
+            if timeout.is_done() {
+                timeout.restart();
+                true
+            } else { false },
+        );
 
         let successors: Vec<NodeDetails<TNode>> = {
             let successors = get_successors(&parent.node);
