@@ -1,15 +1,12 @@
 use std::time::{Duration, Instant};
 
-pub struct Timeout
-{
+pub struct Timeout {
     start: Instant,
     duration: Duration,
 }
 
-impl Timeout
-{
-    pub fn start(duration: Duration) -> Self
-    {
+impl Timeout {
+    pub fn start(duration: Duration) -> Self {
         Self {
             start: Instant::now(),
             duration,

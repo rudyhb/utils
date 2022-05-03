@@ -1,3 +1,4 @@
+use crate::timeout::Timeout;
 use anyhow::Result;
 use log::*;
 use std::cmp::Ordering;
@@ -6,7 +7,6 @@ use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use thiserror::Error;
-use crate::timeout::Timeout;
 
 type TNumber = i32;
 
@@ -28,6 +28,7 @@ pub struct AStarOptions<TNode: AStarNode> {
     custom_end_condition: Option<Box<dyn Fn(&TNode, &TNode) -> bool>>,
     log_interval: Duration,
     suppress_logs: bool,
+    iteration_limit: Option<usize>,
 }
 
 impl<TNode: AStarNode> AStarOptions<TNode> {
@@ -38,15 +39,16 @@ impl<TNode: AStarNode> AStarOptions<TNode> {
         self.custom_end_condition = Some(ending_condition);
         self
     }
-    pub fn with_log_interval(
-        mut self,
-        log_interval: Duration,
-    ) -> Self {
+    pub fn with_log_interval(mut self, log_interval: Duration) -> Self {
         self.log_interval = log_interval;
         self
     }
     pub fn with_no_logs(mut self) -> Self {
         self.suppress_logs = true;
+        self
+    }
+    pub fn with_iteration_limit(mut self, limit: usize) -> Self {
+        self.iteration_limit = Some(limit);
         self
     }
 }
@@ -57,6 +59,7 @@ impl<TNode: AStarNode> Default for AStarOptions<TNode> {
             custom_end_condition: None,
             log_interval: Duration::from_secs(5),
             suppress_logs: false,
+            iteration_limit: None,
         }
     }
 }
@@ -87,10 +90,17 @@ pub enum AStarError {
     NoSolutionFound,
     #[error("An unexpected error occurred")]
     UnexpectedError,
+    #[error("Iteration limit exceeded")]
+    IterLimitExceeded,
 }
 
 struct NodeList<TNode: AStarNode> {
     nodes: HashMap<u64, NodeDetails<TNode>>,
+}
+
+pub struct AStarResult<TNode: AStarNode> {
+    pub shortest_path: Vec<TNode>,
+    pub shortest_path_cost: i32,
 }
 
 impl<TNode: AStarNode> NodeList<TNode> {
@@ -135,14 +145,14 @@ pub fn a_star_search<
     get_successors: TFunc,
     distance_function: TFunc2,
     options: Option<&AStarOptions<TNode>>,
-) -> Result<Vec<TNode>> {
+) -> Result<AStarResult<TNode>> {
     let default_options = AStarOptions::default();
     let options = options.unwrap_or(&default_options);
     let mut node_list = NodeList::new(start);
     let end_condition = &options.custom_end_condition;
     let mut timeout = Timeout::start(options.log_interval);
 
-    for i in 1.. {
+    for i in 1usize..options.iteration_limit.unwrap_or(usize::MAX) {
         let (parent, remaining_list_len) = node_list.get_next()?;
         if !options.suppress_logs {
             print_debug(
@@ -151,7 +161,9 @@ pub fn a_star_search<
                 if timeout.is_done() {
                     timeout.restart();
                     true
-                } else { false },
+                } else {
+                    false
+                },
             );
         }
 
@@ -196,7 +208,7 @@ pub fn a_star_search<
         }
     }
 
-    Err(AStarError::NoSolutionFound.into())
+    Err(AStarError::IterLimitExceeded.into())
 }
 
 fn print_debug<TNode: AStarNode>(
@@ -226,7 +238,8 @@ fn sorting_function<TNode: AStarNode>(
 fn make_results<TNode: AStarNode>(
     end: NodeDetails<TNode>,
     mut node_list: NodeList<TNode>,
-) -> Vec<TNode> {
+) -> AStarResult<TNode> {
+    let shortest_path_cost = end.g;
     let mut results = vec![end.node];
     let mut parent = end.parent;
     while let Some(parent_hash) = parent {
@@ -235,7 +248,10 @@ fn make_results<TNode: AStarNode>(
         parent = node.parent;
     }
     results.reverse();
-    results
+    AStarResult {
+        shortest_path: results,
+        shortest_path_cost,
+    }
 }
 
 struct NodeDetails<TNode: AStarNode> {
@@ -320,7 +336,7 @@ mod tests {
             a_star_search(start, &target, get_successors, distance_function, None).unwrap();
 
         assert_eq!(
-            solution,
+            solution.shortest_path,
             vec![
                 TestNode(1),
                 TestNode(2),
@@ -330,7 +346,8 @@ mod tests {
                 TestNode(6),
                 TestNode(7),
             ]
-        )
+        );
+        assert_eq!(solution.shortest_path_cost, 6);
     }
 
     #[test]
@@ -347,7 +364,7 @@ mod tests {
             a_star_search(start, &target, get_successors, distance_function, options).unwrap();
 
         assert_eq!(
-            solution,
+            solution.shortest_path,
             vec![
                 TestNode(1),
                 TestNode(2),
@@ -358,6 +375,7 @@ mod tests {
                 TestNode(7),
                 TestNode(8),
             ]
-        )
+        );
+        assert_eq!(solution.shortest_path_cost, 7);
     }
 }
