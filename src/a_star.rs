@@ -27,6 +27,7 @@ impl<T: Hash> GetHash for T {
 pub struct AStarOptions<TNode: AStarNode> {
     custom_end_condition: Option<Box<dyn Fn(&TNode, &TNode) -> bool>>,
     log_interval: Duration,
+    suppress_logs: bool,
 }
 
 impl<TNode: AStarNode> AStarOptions<TNode> {
@@ -44,6 +45,10 @@ impl<TNode: AStarNode> AStarOptions<TNode> {
         self.log_interval = log_interval;
         self
     }
+    pub fn with_no_logs(mut self) -> Self {
+        self.suppress_logs = true;
+        self
+    }
 }
 
 impl<TNode: AStarNode> Default for AStarOptions<TNode> {
@@ -51,6 +56,7 @@ impl<TNode: AStarNode> Default for AStarOptions<TNode> {
         Self {
             custom_end_condition: None,
             log_interval: Duration::from_secs(5),
+            suppress_logs: false,
         }
     }
 }
@@ -138,14 +144,16 @@ pub fn a_star_search<
 
     for i in 1.. {
         let (parent, remaining_list_len) = node_list.get_next()?;
-        print_debug(
-            parent,
-            remaining_list_len,
-            if timeout.is_done() {
-                timeout.restart();
-                true
-            } else { false },
-        );
+        if !options.suppress_logs {
+            print_debug(
+                parent,
+                remaining_list_len,
+                if timeout.is_done() {
+                    timeout.restart();
+                    true
+                } else { false },
+            );
+        }
 
         let successors: Vec<NodeDetails<TNode>> = {
             let successors = get_successors(&parent.node);
