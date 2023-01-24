@@ -4,3 +4,4 @@ pub mod compile_warning;
 pub mod num_cpus;
 pub mod timeout;
 pub mod timer;
+pub mod canvas;
