@@ -1,12 +1,14 @@
-use crate::timeout::Timeout;
-use anyhow::Result;
-use log::*;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
+
+use anyhow::Result;
+use log::*;
 use thiserror::Error;
+
+use crate::timeout::Timeout;
 
 type TNumber = i32;
 
@@ -137,13 +139,13 @@ impl<TNode: AStarNode> NodeList<TNode> {
 
 pub fn a_star_search<
     TNode: AStarNode,
-    TFunc: Fn(&TNode) -> Vec<Successor<TNode>> + Sync + Send,
-    TFunc2: Fn(CurrentNodeDetails<TNode>) -> TNumber + Send + Sync,
+    TFunc: FnMut(&TNode) -> Vec<Successor<TNode>> + Sync + Send,
+    TFunc2: FnMut(CurrentNodeDetails<TNode>) -> TNumber + Send + Sync,
 >(
     start: TNode,
     end: &TNode,
-    get_successors: TFunc,
-    distance_function: TFunc2,
+    mut get_successors: TFunc,
+    mut distance_function: TFunc2,
     options: Option<&AStarOptions<TNode>>,
 ) -> Result<AStarResult<TNode>> {
     let default_options = AStarOptions::default();
@@ -211,6 +213,7 @@ pub fn a_star_search<
     Err(AStarError::IterLimitExceeded.into())
 }
 
+#[inline]
 fn print_debug<TNode: AStarNode>(
     q_details: &NodeDetails<TNode>,
     list_len: usize,
