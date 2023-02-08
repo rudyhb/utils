@@ -1,141 +1,22 @@
-use std::cmp::Ordering;
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher};
-use std::time::Duration;
+use std::fmt::Debug;
+use std::hash::Hash;
 
 use anyhow::Result;
 use log::*;
-use thiserror::Error;
+
+pub use models::{AStarError, AStarResult, CurrentNodeDetails, Successor};
+use models::{NodeDetails, NodeList};
+pub use options::AStarOptions;
 
 use crate::timeout::Timeout;
+
+mod helpers;
+mod models;
+mod options;
 
 type TNumber = i32;
 
 pub trait AStarNode: Hash + Eq + PartialEq + Ord + PartialOrd + Send + Sync + Debug {}
-
-trait GetHash: Hash {
-    fn get_hash(&self) -> u64;
-}
-
-impl<T: Hash> GetHash for T {
-    fn get_hash(&self) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
-}
-
-pub struct AStarOptions<TNode: AStarNode> {
-    custom_end_condition: Option<Box<dyn Fn(&TNode, &TNode) -> bool>>,
-    log_interval: Duration,
-    suppress_logs: bool,
-    iteration_limit: Option<usize>,
-}
-
-impl<TNode: AStarNode> AStarOptions<TNode> {
-    pub fn with_ending_condition(
-        mut self,
-        ending_condition: Box<dyn Fn(&TNode, &TNode) -> bool>,
-    ) -> Self {
-        self.custom_end_condition = Some(ending_condition);
-        self
-    }
-    pub fn with_log_interval(mut self, log_interval: Duration) -> Self {
-        self.log_interval = log_interval;
-        self
-    }
-    pub fn with_no_logs(mut self) -> Self {
-        self.suppress_logs = true;
-        self
-    }
-    pub fn with_iteration_limit(mut self, limit: usize) -> Self {
-        self.iteration_limit = Some(limit);
-        self
-    }
-}
-
-impl<TNode: AStarNode> Default for AStarOptions<TNode> {
-    fn default() -> Self {
-        Self {
-            custom_end_condition: None,
-            log_interval: Duration::from_secs(5),
-            suppress_logs: false,
-            iteration_limit: None,
-        }
-    }
-}
-
-pub struct Successor<TNode: AStarNode> {
-    node: TNode,
-    cost_to_move_here: TNumber,
-}
-
-impl<TNode: AStarNode> Successor<TNode> {
-    pub fn new(node: TNode, cost_to_move_here: TNumber) -> Self {
-        Self {
-            node,
-            cost_to_move_here,
-        }
-    }
-}
-
-pub struct CurrentNodeDetails<'a, TNode: AStarNode> {
-    pub current_node: &'a TNode,
-    pub target_node: &'a TNode,
-    pub cost_to_move_to_current: TNumber,
-}
-
-#[derive(Debug, Error)]
-pub enum AStarError {
-    #[error("No solution found")]
-    NoSolutionFound,
-    #[error("An unexpected error occurred")]
-    UnexpectedError,
-    #[error("Iteration limit exceeded")]
-    IterLimitExceeded,
-}
-
-struct NodeList<TNode: AStarNode> {
-    nodes: HashMap<u64, NodeDetails<TNode>>,
-}
-
-pub struct AStarResult<TNode: AStarNode> {
-    pub shortest_path: Vec<TNode>,
-    pub shortest_path_cost: i32,
-}
-
-impl<TNode: AStarNode> NodeList<TNode> {
-    pub(crate) fn new(start: TNode) -> Self {
-        let mut result = Self {
-            nodes: Default::default(),
-        };
-        let hash = start.get_hash();
-        result.nodes.insert(hash, NodeDetails::new(start, 0, 0));
-        result
-    }
-    pub(crate) fn try_insert_successor(&mut self, details: NodeDetails<TNode>) {
-        let hash = details.node.get_hash();
-        if let Some(existing) = self.nodes.get(&hash) {
-            if existing.f() <= details.f() {
-                return;
-            }
-        }
-        self.nodes.insert(hash, details);
-    }
-    pub(crate) fn get_next(&mut self) -> Result<(&NodeDetails<TNode>, usize)> {
-        let index = self
-            .nodes
-            .values()
-            .filter(|node| node.is_open)
-            .min_by(sorting_function)
-            .map(|details| details.node.get_hash())
-            .ok_or(AStarError::NoSolutionFound)?;
-        self.nodes.get_mut(&index).unwrap().is_open = false;
-        let result = self.nodes.get(&index).ok_or(AStarError::UnexpectedError)?;
-        Ok((result, self.nodes.values().filter(|n| n.is_open).count()))
-    }
-}
 
 pub fn a_star_search<
     TNode: AStarNode,
@@ -226,18 +107,6 @@ fn print_debug<TNode: AStarNode>(
     }
 }
 
-fn sorting_function<TNode: AStarNode>(
-    a: &&NodeDetails<TNode>,
-    b: &&NodeDetails<TNode>,
-) -> Ordering {
-    let c = a.f().cmp(&b.f());
-    if c == Ordering::Equal {
-        a.node.cmp(&b.node)
-    } else {
-        c
-    }
-}
-
 fn make_results<TNode: AStarNode>(
     end: NodeDetails<TNode>,
     mut node_list: NodeList<TNode>,
@@ -254,54 +123,6 @@ fn make_results<TNode: AStarNode>(
     AStarResult {
         shortest_path: results,
         shortest_path_cost,
-    }
-}
-
-struct NodeDetails<TNode: AStarNode> {
-    node: TNode,
-    is_open: bool,
-    g: TNumber,
-    h: TNumber,
-    parent: Option<u64>,
-}
-
-impl<TNode: AStarNode> Debug for NodeDetails<TNode> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut val = format!("{:?}", self.node);
-        if val.len() > 130 {
-            val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
-        }
-        write!(f, "q {} with g={}, h={}", val, self.g, self.h)
-    }
-}
-
-impl<TNode: AStarNode> NodeDetails<TNode> {
-    pub(crate) fn new(node: TNode, g: TNumber, h: TNumber) -> Self {
-        Self {
-            node,
-            g,
-            h,
-            parent: None,
-            is_open: true,
-        }
-    }
-    pub(crate) fn new_with(
-        node: TNode,
-        g: TNumber,
-        h: TNumber,
-        parent: &NodeDetails<TNode>,
-    ) -> Self {
-        Self {
-            node,
-            g,
-            h,
-            parent: Some(parent.node.get_hash()),
-            is_open: true,
-        }
-    }
-    #[inline(always)]
-    pub(crate) fn f(&self) -> TNumber {
-        self.g + self.h
     }
 }
 
