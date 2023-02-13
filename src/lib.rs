@@ -5,3 +5,4 @@ pub mod num_cpus;
 pub mod timeout;
 pub mod timer;
 pub mod canvas;
+pub mod pretty_print;
