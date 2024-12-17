@@ -2,7 +2,6 @@ use std::io::{stdout, Stdout, Write};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::Result;
 use crossterm::{cursor, terminal, ExecutableCommand, QueueableCommand};
 
 pub struct Canvas {
@@ -11,7 +10,7 @@ pub struct Canvas {
 }
 
 impl Canvas {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> std::io::Result<Self> {
         let mut stdout = stdout();
         stdout.execute(cursor::Hide)?;
         stdout.queue(terminal::Clear(terminal::ClearType::All))?;
@@ -25,7 +24,7 @@ impl Canvas {
         self.delay = Some(delay);
         self
     }
-    pub fn draw(&mut self, text: &str) -> Result<()> {
+    pub fn draw(&mut self, text: &str) -> std::io::Result<()> {
         self.stdout.queue(cursor::SavePosition)?;
         self.stdout.write_all(text.as_bytes())?;
         self.stdout.queue(cursor::RestorePosition)?;

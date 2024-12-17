@@ -1,18 +1,20 @@
 use std::time::Duration;
 
-use crate::a_star::AStarNode;
+use crate::a_star::Node;
 
-pub struct AStarOptions<TNode: AStarNode> {
-    pub(crate) custom_end_condition: Option<Box<dyn Fn(&TNode, &TNode) -> bool>>,
+pub type CustomEndConditionFun<TNode> = dyn Fn(&TNode, &TNode) -> bool;
+
+pub struct Options<TNode: Node> {
+    pub(crate) custom_end_condition: Option<Box<CustomEndConditionFun<TNode>>>,
     pub(crate) log_interval: Duration,
     pub(crate) suppress_logs: bool,
     pub(crate) iteration_limit: Option<usize>,
 }
 
-impl<TNode: AStarNode> AStarOptions<TNode> {
+impl<TNode: Node> Options<TNode> {
     pub fn with_ending_condition(
         mut self,
-        ending_condition: Box<dyn Fn(&TNode, &TNode) -> bool>,
+        ending_condition: Box<CustomEndConditionFun<TNode>>,
     ) -> Self {
         self.custom_end_condition = Some(ending_condition);
         self
@@ -31,7 +33,7 @@ impl<TNode: AStarNode> AStarOptions<TNode> {
     }
 }
 
-impl<TNode: AStarNode> Default for AStarOptions<TNode> {
+impl<TNode: Node> Default for Options<TNode> {
     fn default() -> Self {
         Self {
             custom_end_condition: None,

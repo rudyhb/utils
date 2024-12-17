@@ -1,35 +1,29 @@
-use std::fmt::Debug;
-use std::hash::Hash;
-
-use anyhow::Result;
 use log::*;
 
-pub use models::{AStarError, AStarResult, CurrentNodeDetails, Successor};
-use models::{NodeDetails, NodeList};
-pub use options::AStarOptions;
-
+use crate::common::Numeric;
 use crate::timeout::Timeout;
+pub use models::{ComputationResult, CurrentNodeDetails, Error, Node, Result, Successor};
+use models::{NodeDetails, NodeList};
+pub use options::Options;
 
 mod helpers;
+mod implementations;
 mod models;
 mod options;
 
-type TNumber = i32;
-
-pub trait AStarNode: Hash + Eq + PartialEq + Ord + PartialOrd + Send + Sync + Debug {}
-
 pub fn a_star_search<
-    TNode: AStarNode,
-    TFunc: FnMut(&TNode) -> Vec<Successor<TNode>> + Sync + Send,
-    TFunc2: FnMut(CurrentNodeDetails<TNode>) -> TNumber + Send + Sync,
+    TNode: Node,
+    TFunc: FnMut(&TNode) -> Vec<Successor<TNode, TNumber>> + Sync + Send,
+    TFunc2: FnMut(CurrentNodeDetails<TNode, TNumber>) -> TNumber + Send + Sync,
+    TNumber: Numeric,
 >(
     start: TNode,
     end: &TNode,
     mut get_successors: TFunc,
     mut distance_function: TFunc2,
-    options: Option<&AStarOptions<TNode>>,
-) -> Result<AStarResult<TNode>> {
-    let default_options = AStarOptions::default();
+    options: Option<&Options<TNode>>,
+) -> Result<ComputationResult<TNode, TNumber>> {
+    let default_options = Options::default();
     let options = options.unwrap_or(&default_options);
     let mut node_list = NodeList::new(start);
     let end_condition = &options.custom_end_condition;
@@ -38,21 +32,18 @@ pub fn a_star_search<
     for i in 1usize..options.iteration_limit.unwrap_or(usize::MAX) {
         let (parent, remaining_list_len) = node_list.get_next()?;
         if !options.suppress_logs {
-            print_debug(
-                parent,
-                remaining_list_len,
-                if timeout.is_done() {
-                    timeout.restart();
-                    true
-                } else {
-                    false
-                },
-            );
+            if timeout.is_done() {
+                debug!("got {:?}, list_len={}", parent, remaining_list_len);
+                timeout.restart();
+            } else {
+                trace!("got {:?}, list_len={}", parent, remaining_list_len);
+            }
         }
 
-        let successors: Vec<NodeDetails<TNode>> = {
+        let successors: Vec<NodeDetails<TNode, TNumber>> = {
             let successors = get_successors(&parent.node);
-            let mut results: Vec<NodeDetails<TNode>> = Vec::with_capacity(successors.len());
+            let mut results: Vec<NodeDetails<TNode, TNumber>> =
+                Vec::with_capacity(successors.len());
             for Successor {
                 node: successor,
                 cost_to_move_here: distance,
@@ -60,14 +51,14 @@ pub fn a_star_search<
             {
                 let to_current = parent.g + distance;
 
-                if {
-                    if let Some(condition) = end_condition.as_ref() {
-                        condition(&successor, end)
-                    } else {
-                        successor == *end
-                    }
-                } {
-                    let end_details = NodeDetails::new_with(successor, to_current, 0, parent);
+                let is_at_end = if let Some(condition) = end_condition.as_ref() {
+                    condition(&successor, end)
+                } else {
+                    successor == *end
+                };
+                if is_at_end {
+                    let end_details =
+                        NodeDetails::new_with(successor, to_current, TNumber::default(), parent);
                     if !options.suppress_logs {
                         debug!("a_star took {} steps", i);
                     }
@@ -76,7 +67,7 @@ pub fn a_star_search<
 
                 let to_end = distance_function(CurrentNodeDetails {
                     current_node: &successor,
-                    target_node: &end,
+                    target_node: end,
                     cost_to_move_to_current: to_current,
                 });
                 let details = NodeDetails::new_with(successor, to_current, to_end, parent);
@@ -91,26 +82,13 @@ pub fn a_star_search<
         }
     }
 
-    Err(AStarError::IterLimitExceeded.into())
+    Err(Error::IterLimitExceeded)
 }
 
-#[inline]
-fn print_debug<TNode: AStarNode>(
-    q_details: &NodeDetails<TNode>,
-    list_len: usize,
-    debug_level: bool,
-) {
-    if debug_level {
-        debug!("got {:?}, list_len={}", q_details, list_len);
-    } else {
-        trace!("got {:?}, list_len={}", q_details, list_len);
-    }
-}
-
-fn make_results<TNode: AStarNode>(
-    end: NodeDetails<TNode>,
-    mut node_list: NodeList<TNode>,
-) -> AStarResult<TNode> {
+fn make_results<TNode: Node, TNumber: Numeric>(
+    end: NodeDetails<TNode, TNumber>,
+    mut node_list: NodeList<TNode, TNumber>,
+) -> ComputationResult<TNode, TNumber> {
     let shortest_path_cost = end.g;
     let mut results = vec![end.node];
     let mut parent = end.parent;
@@ -120,7 +98,7 @@ fn make_results<TNode: AStarNode>(
         parent = node.parent;
     }
     results.reverse();
-    AStarResult {
+    ComputationResult {
         shortest_path: results,
         shortest_path_cost,
     }
@@ -133,9 +111,9 @@ mod tests {
     #[derive(Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug)]
     struct TestNode(i32);
 
-    impl AStarNode for TestNode {}
+    impl Node for TestNode {}
 
-    fn distance_function(node_details: CurrentNodeDetails<TestNode>) -> i32 {
+    fn distance_function(node_details: CurrentNodeDetails<TestNode, i32>) -> i32 {
         let CurrentNodeDetails {
             current_node: left,
             target_node: right,
@@ -144,7 +122,7 @@ mod tests {
         (left.0 - right.0).abs()
     }
 
-    fn get_successors(node: &TestNode) -> Vec<Successor<TestNode>> {
+    fn get_successors(node: &TestNode) -> Vec<Successor<TestNode, i32>> {
         vec![
             Successor::new(TestNode(node.0 - 1), 1),
             Successor::new(TestNode(node.0 + 1), 1),
@@ -179,7 +157,7 @@ mod tests {
         let start = TestNode(1);
         let target = TestNode(7);
 
-        let options = AStarOptions::default().with_ending_condition(Box::new(
+        let options = Options::default().with_ending_condition(Box::new(
             |current: &TestNode, _target: &TestNode| current.0 == 8,
         ));
         let options = Some(&options);
