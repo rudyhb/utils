@@ -35,14 +35,14 @@ pub enum Error {
 }
 
 pub(crate) struct NodeList<TNode: Node, TNumber: Numeric> {
-    pub(crate) nodes: HashMap<u64, NodeDetails<TNode, TNumber>>,
+    pub(crate) candidate_nodes: HashMap<u64, NodeDetails<TNode, TNumber>>,
+    pub(crate) node_history: HashMap<u64, NodeDetails<TNode, TNumber>>,
 }
 
 #[derive(Eq, PartialEq)]
 pub(crate) struct NodeDetails<TNode: Node, TNumber: Numeric> {
     pub(crate) node: TNode,
-    pub(crate) is_open: bool,
-    pub(crate) g: TNumber,
-    pub(crate) h: TNumber,
+    pub(crate) current_accrued_cost: TNumber,
+    pub(crate) estimated_cost_to_goal: TNumber,
     pub(crate) parent: Option<u64>,
 }

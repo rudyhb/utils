@@ -17,10 +17,11 @@ impl<TNode: Node, TNumber: Numeric> Successor<TNode, TNumber> {
 impl<TNode: Node, TNumber: Numeric> NodeList<TNode, TNumber> {
     pub(crate) fn new(start: TNode) -> Self {
         let mut result = Self {
-            nodes: Default::default(),
+            candidate_nodes: Default::default(),
+            node_history: Default::default(),
         };
         let hash = start.get_hash();
-        result.nodes.insert(
+        result.candidate_nodes.insert(
             hash,
             NodeDetails::new(start, TNumber::default(), TNumber::default()),
         );
@@ -28,30 +29,36 @@ impl<TNode: Node, TNumber: Numeric> NodeList<TNode, TNumber> {
     }
     pub(crate) fn try_insert_successor(&mut self, details: NodeDetails<TNode, TNumber>) {
         let hash = details.node.get_hash();
-        if let Some(existing) = self.nodes.get(&hash) {
-            if existing.f() <= details.f() {
-                return;
+        if [&self.node_history, &self.candidate_nodes]
+            .into_iter().any(|nodes| {
+            if let Some(existing) = nodes.get(&hash) {
+                if existing.sum_accrued_plus_estimated_cost() <= details.sum_accrued_plus_estimated_cost() {
+                    return true;
+                }
             }
+            false
+        }) {
+            return;
         }
-        self.nodes.insert(hash, details);
+        self.candidate_nodes.insert(hash, details);
     }
     pub(crate) fn get_next(&mut self) -> Result<(&NodeDetails<TNode, TNumber>, usize)> {
         let index = self
-            .nodes
+            .candidate_nodes
             .values()
-            .filter(|node| node.is_open)
             .min()
             .map(|details| details.node.get_hash())
             .ok_or(Error::NoSolutionFound)?;
-        self.nodes.get_mut(&index).unwrap().is_open = false;
-        let result = self.nodes.get(&index).ok_or(Error::UnexpectedError)?;
-        Ok((result, self.nodes.values().filter(|n| n.is_open).count()))
+        let node = self.candidate_nodes.remove(&index).unwrap();
+        self.node_history.insert(index, node);
+        let result = self.node_history.get(&index).ok_or(Error::UnexpectedError)?;
+        Ok((result, self.candidate_nodes.len()))
     }
 }
 
 impl<T: Node, TNumber: Numeric> PartialOrd for NodeDetails<T, TNumber> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let c = self.f().cmp(&other.f());
+        let c = self.sum_accrued_plus_estimated_cost().cmp(&other.sum_accrued_plus_estimated_cost());
         if c == Ordering::Equal {
             Some(self.node.cmp(&other.node))
         } else {
@@ -72,36 +79,34 @@ impl<TNode: Node, TNumber: Numeric> Debug for NodeDetails<TNode, TNumber> {
         if val.len() > 130 {
             val = format!("{}..{}", &val[..65], &val[val.len() - 65..])
         }
-        write!(f, "q {} with g={}, h={}", val, self.g, self.h)
+        write!(f, "node {} with accrued={}, estimated_to_goal={}", val, self.current_accrued_cost, self.estimated_cost_to_goal)
     }
 }
 
 impl<TNode: Node, TNumber: Numeric> NodeDetails<TNode, TNumber> {
-    pub(crate) fn new(node: TNode, g: TNumber, h: TNumber) -> Self {
+    pub(crate) fn new(node: TNode, current_accrued_cost: TNumber, estimated_cost_to_goal: TNumber) -> Self {
         Self {
             node,
-            g,
-            h,
+            current_accrued_cost,
             parent: None,
-            is_open: true,
+            estimated_cost_to_goal,
         }
     }
-    pub(crate) fn new_with(
+    pub(crate) fn new_with_parent(
         node: TNode,
-        g: TNumber,
-        h: TNumber,
+        current_accrued_cost: TNumber,
+        estimated_cost_to_goal: TNumber,
         parent: &NodeDetails<TNode, TNumber>,
     ) -> Self {
         Self {
             node,
-            g,
-            h,
+            current_accrued_cost,
+            estimated_cost_to_goal,
             parent: Some(parent.node.get_hash()),
-            is_open: true,
         }
     }
     #[inline(always)]
-    pub(crate) fn f(&self) -> TNumber {
-        self.g + self.h
+    pub(crate) fn sum_accrued_plus_estimated_cost(&self) -> TNumber {
+        self.current_accrued_cost + self.estimated_cost_to_goal
     }
 }
