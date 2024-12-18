@@ -1,24 +1,29 @@
+use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 
-use crate::a_star::Node;
-
-pub type CustomEndConditionFun<TNode> = dyn Fn(&TNode, &TNode) -> bool;
-
-pub struct Options<TNode: Node> {
-    pub(crate) custom_end_condition: Option<Box<CustomEndConditionFun<TNode>>>,
+pub struct Options {
     pub(crate) log_interval: Duration,
     pub(crate) suppress_logs: bool,
     pub(crate) iteration_limit: Option<usize>,
 }
 
-impl<TNode: Node> Options<TNode> {
-    pub fn with_ending_condition(
-        mut self,
-        ending_condition: Box<CustomEndConditionFun<TNode>>,
-    ) -> Self {
-        self.custom_end_condition = Some(ending_condition);
-        self
+impl Debug for Options {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "log={} interval={:?} iter_limit={:?}",
+            !self.suppress_logs,
+            if self.suppress_logs {
+                None
+            } else {
+                Some(self.log_interval)
+            },
+            self.iteration_limit,
+        )
     }
+}
+
+impl Options {
     pub fn with_log_interval(mut self, log_interval: Duration) -> Self {
         self.log_interval = log_interval;
         self
@@ -33,10 +38,9 @@ impl<TNode: Node> Options<TNode> {
     }
 }
 
-impl<TNode: Node> Default for Options<TNode> {
+impl Default for Options {
     fn default() -> Self {
         Self {
-            custom_end_condition: None,
             log_interval: Duration::from_secs(5),
             suppress_logs: false,
             iteration_limit: None,
