@@ -32,7 +32,9 @@ pub fn a_star_search<
     let mut node_list = NodeList::new(start);
     let mut timeout = Timeout::start(options.log_interval);
 
-    debug!("[a*] starting a* search with options {:?}", options);
+    if !options.suppress_logs {
+        debug!("[a*] starting a* search with options {:?}", options);
+    }
 
     for i in 1usize..options.iteration_limit.unwrap_or(usize::MAX) {
         let (parent, remaining_list_len) = node_list.get_next()?;
@@ -116,10 +118,12 @@ pub fn a_star_search_all_with_max_score<
     let mut node_list = NodeList::new(start);
     let mut timeout = Timeout::start(options.log_interval);
 
-    debug!(
-        "[a*] starting search all with max score of {} and options {:?}",
-        max_score, options
-    );
+    if !options.suppress_logs {
+        debug!(
+            "[a*] starting search all with max score of {} and options {:?}",
+            max_score, options
+        );
+    }
 
     let mut scoring_results: Vec<NodeDetails<TNode, TNumber>> = vec![];
 

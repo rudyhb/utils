@@ -56,6 +56,34 @@ pub fn get_zero<TFun: Fn(f64) -> f64>(
     }
 }
 
+pub fn find_first_true<TFun: Fn(usize) -> bool>(
+    func: TFun,
+    mut left: usize,
+    mut right: usize,
+) -> Option<usize> {
+    if left > right {
+        (left, right) = (right, left);
+    }
+    let value_left = func(left);
+    let value_right = func(right);
+    if value_left == value_right {
+        return None;
+    }
+    loop {
+        let guess = (left + right) / 2;
+        if guess == left {
+            return Some(if value_left { left } else { right });
+        }
+
+        let value_guess = func(guess);
+        if value_guess == value_left {
+            left = guess;
+        } else {
+            right = guess;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +118,12 @@ mod tests {
         let solution = 5f64.sqrt() * 2.0;
         let round = |n: f64| (n * 1000.0).round() / 1000.0;
         assert_eq!(round(zero), round(solution));
+    }
+
+    #[test]
+    fn should_find_seven() {
+        let func = |x: usize| x >= 7;
+        let seven = find_first_true(func, 0, 20);
+        assert_eq!(seven, Some(7));
     }
 }
