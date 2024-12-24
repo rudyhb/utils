@@ -39,7 +39,6 @@ pub struct ComputationResult<TNode: CustomNode, TNumber: Numeric> {
 
 pub struct CurrentNodeDetails<'a, TNode: CustomNode, TNumber: Numeric> {
     pub current_node: &'a TNode,
-    pub target_node: &'a TNode,
     pub cost_to_move_to_current: TNumber,
 }
 

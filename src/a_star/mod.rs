@@ -17,11 +17,10 @@ pub fn a_star_search<
     TNode: CustomNode,
     TSuccessorsFunc: FnMut(&TNode) -> Vec<Successor<TNode, TNumber>> + Sync + Send,
     TDistanceFunc: FnMut(CurrentNodeDetails<TNode, TNumber>) -> TNumber + Send + Sync,
-    TEndCheckFunc: FnMut(&TNode, &TNode) -> bool,
+    TEndCheckFunc: FnMut(&TNode) -> bool,
     TNumber: Numeric,
 >(
     start: TNode,
-    end: &TNode,
     mut get_successors: TSuccessorsFunc,
     mut distance_function: TDistanceFunc,
     mut is_at_end_function: TEndCheckFunc,
@@ -65,7 +64,7 @@ pub fn a_star_search<
             {
                 let to_current = parent.current_accrued_cost + distance;
 
-                if is_at_end_function(&successor, end) {
+                if is_at_end_function(&successor) {
                     let end_details = NodeDetails::new_with_parent(
                         successor,
                         to_current,
@@ -80,7 +79,6 @@ pub fn a_star_search<
 
                 let to_end = distance_function(CurrentNodeDetails {
                     current_node: &successor,
-                    target_node: end,
                     cost_to_move_to_current: to_current,
                 });
                 let details = NodeDetails::new_with_parent(successor, to_current, to_end, parent);
@@ -102,12 +100,11 @@ pub fn a_star_search_all_with_max_score<
     TNode: CustomNode + Clone,
     TSuccessorsFunc: FnMut(&TNode) -> Vec<Successor<TNode, TNumber>> + Sync + Send,
     TDistanceFunc: FnMut(CurrentNodeDetails<TNode, TNumber>) -> TNumber + Send + Sync,
-    TEndCheckFunc: FnMut(&TNode, &TNode) -> bool,
+    TEndCheckFunc: FnMut(&TNode) -> bool,
     TNumber: Numeric,
 >(
     max_score: TNumber,
     start: TNode,
-    end: &TNode,
     mut get_successors: TSuccessorsFunc,
     mut distance_function: TDistanceFunc,
     mut is_at_end_function: TEndCheckFunc,
@@ -174,7 +171,7 @@ pub fn a_star_search_all_with_max_score<
                     continue;
                 }
 
-                if is_at_end_function(&successor, end) {
+                if is_at_end_function(&successor) {
                     let end_details = NodeDetails::new_with_parent(
                         successor,
                         to_current,
@@ -188,7 +185,6 @@ pub fn a_star_search_all_with_max_score<
 
                 let to_end = distance_function(CurrentNodeDetails {
                     current_node: &successor,
-                    target_node: end,
                     cost_to_move_to_current: to_current,
                 });
                 let details = NodeDetails::new_with_parent(successor, to_current, to_end, parent);
@@ -257,13 +253,15 @@ mod tests {
 
     impl Node for TestNode {}
 
-    fn distance_function(node_details: CurrentNodeDetails<TestNode, i32>) -> i32 {
+    fn distance_function(
+        node_details: CurrentNodeDetails<TestNode, i32>,
+        target_node: &TestNode,
+    ) -> i32 {
         let CurrentNodeDetails {
             current_node: left,
-            target_node: right,
             cost_to_move_to_current: _to_current,
         } = node_details;
-        (left.0 - right.0).abs()
+        (left.0 - target_node.0).abs()
     }
 
     fn get_successors(node: &TestNode) -> Vec<Successor<TestNode, i32>> {
@@ -280,10 +278,9 @@ mod tests {
 
         let solution = a_star_search(
             start,
-            &target,
             get_successors,
-            distance_function,
-            |current, end| current == end,
+            |current| distance_function(current, &target),
+            |current| current == &target,
             None,
         )
         .unwrap();
@@ -313,10 +310,9 @@ mod tests {
 
         let solution = a_star_search(
             start,
-            &target,
             get_successors,
-            distance_function,
-            |current, _end| current.0 == 8,
+            |current| distance_function(current, &target),
+            |current| current.0 == 8,
             options,
         )
         .unwrap();
@@ -345,15 +341,14 @@ mod tests {
         let solution = a_star_search_all_with_max_score(
             5,
             start,
-            &target,
             |node| {
                 vec![
                     Successor::new(TestNode(node.0 - 1), 1),
                     Successor::new(TestNode(node.0 + 1), 1),
                 ]
             },
-            |node| (node.current_node.0.pow(2) - node.target_node.0).abs(),
-            |current, end| current.0.pow(2) == end.0,
+            |node| (node.current_node.0.pow(2) - target.0).abs(),
+            |current| current.0.pow(2) == target.0,
             None,
         )
         .unwrap();
@@ -407,15 +402,14 @@ mod tests {
         let solution = a_star_search_all_with_max_score(
             5,
             start,
-            &target,
             |node| {
                 vec![
                     Successor::new(TestNode2(node.0 - 1), 1),
                     Successor::new(TestNode2(node.0 + 1), 1),
                 ]
             },
-            |node| (node.current_node.0.pow(2) - node.target_node.0).abs(),
-            |current, end| current.0.pow(2) == end.0,
+            |node| (node.current_node.0.pow(2) - target.0).abs(),
+            |current| current.0.pow(2) == target.0,
             None,
         )
         .unwrap();
