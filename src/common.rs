@@ -63,6 +63,22 @@ impl Invertible for usize {
         1 / self
     }
 }
+impl Invertible for isize {
+    fn invert(self) -> Self {
+        1 / self
+    }
+}
+
+impl Invertible for u32 {
+    fn invert(self) -> Self {
+        1 / self
+    }
+}
+impl Invertible for u64 {
+    fn invert(self) -> Self {
+        1 / self
+    }
+}
 
 impl Invertible for f32 {
     fn invert(self) -> Self {
@@ -73,5 +89,40 @@ impl Invertible for f32 {
 impl Invertible for f64 {
     fn invert(self) -> Self {
         1.0 / self
+    }
+}
+
+pub trait NumericWithUnitValue: Numeric {
+    fn unit() -> Self;
+}
+
+impl NumericWithUnitValue for u64 {
+    fn unit() -> Self {
+        1
+    }
+}
+impl NumericWithUnitValue for u32 {
+    fn unit() -> Self {
+        1
+    }
+}
+impl NumericWithUnitValue for usize {
+    fn unit() -> Self {
+        1
+    }
+}
+impl NumericWithUnitValue for i32 {
+    fn unit() -> Self {
+        1
+    }
+}
+impl NumericWithUnitValue for i64 {
+    fn unit() -> Self {
+        1
+    }
+}
+impl NumericWithUnitValue for isize {
+    fn unit() -> Self {
+        1
     }
 }

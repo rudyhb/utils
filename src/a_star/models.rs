@@ -1,5 +1,5 @@
 use crate::a_star::helpers::GetHash;
-use crate::common::Numeric;
+use crate::common::{Numeric, NumericWithUnitValue};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -65,4 +65,10 @@ pub(crate) struct NodeDetails<TNode: CustomNode, TNumber: Numeric> {
     pub(crate) current_accrued_cost: TNumber,
     pub(crate) estimated_cost_to_goal: TNumber,
     pub(crate) parent: Option<u64>,
+}
+
+impl<TNode: CustomNode, TNumber: NumericWithUnitValue> From<TNode> for Successor<TNode, TNumber> {
+    fn from(value: TNode) -> Self {
+        Self::new(value, TNumber::unit())
+    }
 }
