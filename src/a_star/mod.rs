@@ -3,7 +3,7 @@ use log::*;
 use crate::common::Numeric;
 use crate::timeout::Timeout;
 pub use models::{
-    ComputationResult, CurrentNodeDetails, CustomNode, Error, Node, Result, Successor,
+    ComputationResult, CurrentNodeDetails, CustomNode, Error, Node, Result, Successor, NodeSuccessorConverter
 };
 use models::{NodeDetails, NodeList};
 pub use options::Options;

@@ -67,6 +67,16 @@ pub(crate) struct NodeDetails<TNode: CustomNode, TNumber: Numeric> {
     pub(crate) parent: Option<u64>,
 }
 
+pub trait NodeSuccessorConverter<TNode: CustomNode, TNumber: Numeric> {
+    fn to_successor(self, cost: TNumber) -> Successor<TNode, TNumber>;
+}
+
+impl<TNode: CustomNode, TNumber: Numeric> NodeSuccessorConverter<TNode, TNumber> for TNode {
+    fn to_successor(self, cost: TNumber) -> Successor<TNode, TNumber> {
+        Successor::new(self, cost)
+    }
+}
+
 impl<TNode: CustomNode, TNumber: NumericWithUnitValue> From<TNode> for Successor<TNode, TNumber> {
     fn from(value: TNode) -> Self {
         Self::new(value, TNumber::unit())
