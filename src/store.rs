@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub trait StoreData: Default {
-    fn serialize(&self) -> Vec<u8>;
+    fn serialize(&self) -> std::io::Result<Vec<u8>>;
     fn deserialize(bytes: &[u8]) -> std::io::Result<Self>
     where
         Self: Sized;
@@ -34,24 +34,26 @@ impl<T: StoreData> Store<T> {
             store_path,
         })
     }
-    pub fn with_mut<F: FnOnce(&mut T)>(&mut self, fun: F) {
+    pub fn with_mut<F: FnOnce(&mut T)>(&mut self, fun: F) -> std::io::Result<()> {
         let val = &mut self.data.lock().unwrap();
         fun(val);
-        self.flush_not_thread_safe(val);
+        self.flush_not_thread_safe(val)?;
+        Ok(())
     }
     pub fn with<F: FnOnce(&T)>(&self, fun: F) {
         let val = &self.data.lock().unwrap();
         fun(val);
     }
-    fn flush_not_thread_safe(&self, val: &T) {
+    fn flush_not_thread_safe(&self, val: &T) -> std::io::Result<()> {
         log::trace!("writing to store file {}", self.store_path.display());
-        if let Some(err) = fs::write(&self.store_path, val.serialize().as_slice()).err() {
+        if let Some(err) = fs::write(&self.store_path, val.serialize()?.as_slice()).err() {
             log::error!(
                 "error writing to store file {}: {}",
                 self.store_path.display(),
                 err
             );
         }
+        Ok(())
     }
 }
 
@@ -68,8 +70,8 @@ mod tests {
     }
     
     impl StoreData for A {
-        fn serialize(&self) -> Vec<u8> {
-            vec![self.b, self.c]
+        fn serialize(&self) -> std::io::Result<Vec<u8>> {
+            Ok(vec![self.b, self.c])
         }
 
         fn deserialize(bytes: &[u8]) -> std::io::Result<Self>
@@ -95,7 +97,7 @@ mod tests {
             assert_eq!(val, &A::default());
             val.b = 10;
             val.c = 211;
-        });
+        }).unwrap();
         
         drop(store);
         
