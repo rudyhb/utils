@@ -7,5 +7,6 @@ pub mod timer;
 pub mod canvas;
 pub mod pretty_print;
 pub mod temp;
+pub mod store;
 
 pub mod common;
